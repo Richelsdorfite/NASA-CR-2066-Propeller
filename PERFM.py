@@ -53,7 +53,7 @@ CPANG = np.array([
     [-0.2077,0.0153,0.2657,0.5387,0.8107,1.0750,1.3418,1.5989,1.8697,2.1238],
     [-0.4508,0.1426,0.7858,1.4480,2.0899,2.7130,0.,0.,0.,0.],
     [0.0450,0.0461,0.0511,0.0602,0.0943,0.1475,0.2138,0.2969,0.4015,0.5237],
-    [0.0520,0.1065,0.2019,0.3230,0.4774,0.6607,0.,0.,0.,0.],
+    [0.0520,0.1063,0.2019,0.3230,0.4774,0.6607,0.,0.,0.,0.],
     [-0.0168,-0.0085,0.0457,0.1774,0.3520,0.5506,0.7833,1.0236,0.,0.],
     [-0.1678,-0.0840,0.0752,0.3262,0.6085,0.9127,1.2449,1.5430,0.,0.],
     [-0.2903,-0.0603,0.2746,0.6803,1.0989,1.5353,1.9747,0.,0.,0.],
@@ -80,7 +80,7 @@ CTANG = np.array([
     [0.0426,0.0633,0.0853,0.1101,0.1649,0.2204,0.2678,0.3071,0.3318,0.3416],
     [0.0318,0.1116,0.1909,0.2650,0.3241,0.3423,0.,0.,0.,0.],
     [-0.1761,-0.0960,0.0083,0.1114,0.2032,0.2834,0.3487,0.3596,0.,0.],
-    [-0.2155,-0.1129,0.0188,0.1385,0.2401,0.3231,0.3850,0.3850,0.,0.],
+    [-0.2155,-0.1129,0.0188,0.1420,0.2401,0.3231,0.3850,0.3850,0.,0.],
     [-0.2137,-0.0657,0.0859,0.2108,0.3141,0.3894,0.4095,0.,0.,0.],
     [-0.1447,-0.0314,0.0698,0.1577,0.2342,0.3013,0.3611,0.4067,0.4457,0.4681],
     [-0.2338,-0.0471,0.1108,0.2357,0.3357,0.4174,0.,0.,0.,0.],
@@ -127,7 +127,7 @@ CPCLI = np.array([
 
 CTCLI = np.array([
     [0.0013,0.0211,0.0407,0.0600,0.0789,0.1251,0.1702,0.2117,0.2501,0.2840,0.3148,0.3316,0.,0.],
-    [0.0158,0.0362,0.0563,0.0761,0.0954,0.0419,0.1868,0.2287,0.2669,0.3013,0.3317,0.3460,0.,0.],
+    [0.0158,0.0362,0.0563,0.0761,0.0954,0.1419,0.1868,0.2287,0.2669,0.3013,0.3317,0.3460,0.,0.],
     [0.0,0.0083,0.0297,0.0507,0.0713,0.0916,0.1114,0.1585,0.2032,0.2456,0.2834,0.3191,0.3487,0.3626],
     [0.0130,0.0208,0.0428,0.0645,0.0857,0.1064,0.1267,0.1748,0.2195,0.2619,0.2995,0.3350,0.3647,0.3802],
     [0.0260,0.0331,0.0552,0.0776,0.0994,0.1207,0.1415,0.1907,0.2357,0.2778,0.3156,0.3505,0.3808,0.3990],
@@ -144,7 +144,13 @@ XPCLI = np.array([
 ], dtype=float)
 
 XTCLI = np.array([
-    [22.85,2.40,1.75,1.529,1.412,1.268,1.191,1.158,1.130,1.122,1.108,1.108,0.,0.],
+    # NOTE: XTCLI[0][0] corrected from 22.85 (original document) to 4.474.
+    # 22.85 is believed to be a scan/transcription error in the NASA CR-2066 source.
+    # Estimated from trend: ratio XTCLI[row0]/XTCLI[row1] decreases smoothly from
+    # 1.71 at pos 1 → extrapolates to ~2.1–2.6 at pos 0, giving ~3.9–4.9.
+    # Cross-check via XPCLI row 0 ratio (pos0/pos1 = 4.26/2.285 = 1.864) applied to
+    # XTCLI pos 1 (2.40 × 1.864 = 4.474). Only affects CLI=0.3 at very low CT (~0.0013).
+    [4.474,2.40,1.75,1.529,1.412,1.268,1.191,1.158,1.130,1.122,1.108,1.108,0.,0.],
     [1.880,1.400,1.268,1.208,1.170,1.110,1.089,1.071,1.060,1.054,1.051,1.048,0.,0.],
     [1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.],
     [0.,0.399,0.694,0.787,0.831,0.860,0.881,0.908,0.926,0.940,0.945,0.951,0.958,0.958],
@@ -181,7 +187,16 @@ ZMMMC = np.array([
     1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,1.,
     0.979,0.981,0.984,0.987,0.990,0.993,0.996,1.00,1.00,1.00,1.00,1.00,
     0.944,0.945,0.950,0.958,0.966,0.975,0.984,0.990,0.996,0.999,1.00,1.00,
-    0.901,0.905,0.912,0.927,0.942,0.954,0.964,0.974,0.984,0.990,0.900,0.900,
+    # NOTE: last two values corrected from 0.900,0.900 (original document) to 0.994,0.996.
+    # 0.900 is believed to be a scan/transcription error (likely misread of 0.990 with a
+    # dropped digit). However even 0.990 would be wrong: it would make the row flat from
+    # pos 9 onward, inconsistent with all other DMN rows. Correct values estimated from:
+    #   - Column interpolation (DMN=0.06 between 0.04→1.000 and 0.08→0.984):
+    #       linear = 0.992, quadratic = 0.995 for both positions.
+    #   - Within-row increment trend (slowing toward 1.0):
+    #       pos9=0.990, +0.004 -> pos10=0.994, +0.002 -> pos11=0.996.
+    # Both methods agree: CT=0.36 -> 0.994, CT=0.40 -> 0.996.
+    0.901,0.905,0.912,0.927,0.942,0.954,0.964,0.974,0.984,0.990,0.994,0.996,
     0.862,0.866,0.875,0.892,0.909,0.926,0.942,0.957,0.970,0.980,0.984,0.984,
     0.806,0.813,0.825,0.851,0.877,0.904,0.924,0.939,0.952,0.961,0.971,0.976
 ], dtype=float)
@@ -316,6 +331,14 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
         error_591 = False
 
         # ── J-group loop (DO 300 K=NBEG,NEND) ──────────────────────────
+        # In the IW=2 branch, CTE is used for the BTDCR lookup (Fortran line 338)
+        # but is not set inside the branch itself.  For K > NBEG it carries the
+        # value written at label 271 (CTE = CTT[K]*AFCT[K]*TCLI) at the end of
+        # the previous K body — correct Fortran carry-over behaviour.
+        # For K = NBEG (first pass) Fortran has an undefined value; the best
+        # practical approximation is CT * AFCT[NBEG] (input thrust × AF correction),
+        # which keeps CTE inside the CTEC table range [0.01 … 0.44].
+        CTE = CT * AFCT[NBEG]
         for K in range(NBEG, NEND + 1):
 
             # --- IW == 3: stall path ---
@@ -356,7 +379,8 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
                 # FIX 10 (partial): KL is outer loop, KJ is inner (Fortran DO 260/DO 2600)
                 NNCLT = NCLT
                 for KL in range(NCLT, NCLTT + 1):
-                    CTE = CT * AFCT[K]      # FIX: constant CTE for table lookup (not varying CTE1)
+                    # CTE carries the value from Fortran label 271 of the previous K-iteration
+                    # (CTE = CTT[K]*AFCT[K]*TCLI); for K=NBEG it is 0.0 (initialised above).
                     CTA[0] = CT           # reset secant guesses for each CLI group
                     CTA[1] = 1.5 * CT
                     NFTX = 0
@@ -381,7 +405,7 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
                             ZMCRT, _ = unint(11, ZJCL, ZMCRL[NNCLT], ZJJ[K])
                             DMN = ZMS[0] - ZMCRT
                         XFFT[KL] = 1.0
-                        if abs(DMN) > 0.0:  # Allow both positive and negative DMN
+                        if DMN > 0.0:   # Fortran: IF(DMN) 2300,2300,252 — BIQUAD only when DMN > 0
                             CTE2 = CTE1 * TXCLI[KL] / TFCLI[K]
                             XFFT[KL], _ = biquad(ZMMMC.tolist(), 0, DMN, CTE2)
                         CTA1[KJ] = CT - CTA[KJ] * XFFT[KL]
@@ -410,7 +434,9 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
                 CTE = CTT[K] * AFCT[K] * TCLI
                 # FIX 2: BLDANG[K]
                 BLL[K], _ = unint(INN[K], CTANG[:, K, L], BLDANG[K], CTE)
-                CPP[K], _ = unint(INN[K], BLDANG[K], CPANG[:, K, L], BLL[K])
+                CPP[K], lim = unint(INN[K], BLDANG[K], CPANG[:, K, L], BLL[K])
+                if lim != 0:          # Fortran: IF(LIMIT.EQ.0) GO TO 2501 / GO TO 591
+                    error_591 = True; break
 
         # ── End of K loop ───────────────────────────────────────────────
         if error_591:

@@ -418,6 +418,8 @@ def main_loop():
                         # FIX 6: TIPSDG[0] must be set to 700 for the stall iteration
                         #         (Fortran line 150: TIPSDG(1)=700.)
                         TRIG = 0.0    # FIX 7: flag – set to 1 when stall converges (→ exits tip-speed loop)
+                        IFIN = 0      # initialise here so it is always defined even when all ITS
+                                      # iterations take the stall path (continue skips the inner IFIN=0)
                         if com_zinput.STALIT[IC] > 0.50:
                             TIPSDG[0] = 700.0       # FIX 6: first stall-guess tip-speed
                             TIPSPD    = 700.0
