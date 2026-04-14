@@ -414,80 +414,131 @@ def main_loop():
                         # NTS is set earlier in the operating condition block
                         NTS = int(com_zinput.NDTS[IC]) if com_zinput.STALIT[IC] <= 0.50 else 10
 
-                        # Initialize tip speed
-                        # FIX 6: TIPSDG[0] must be set to 700 for the stall iteration
-                        #         (Fortran line 150: TIPSDG(1)=700.)
-                        TRIG = 0.0    # FIX 7: flag – set to 1 when stall converges (→ exits tip-speed loop)
-                        IFIN = 0      # initialise here so it is always defined even when all ITS
-                                      # iterations take the stall path (continue skips the inner IFIN=0)
+                        # Initialize tip speed and stall work arrays
+                        # Fortran: TRIG=0, TIPSDG(1)=700, DTS=0 for stall mode (lines 148-152)
+                        TRIG = 0.0
+                        IFIN = 0
                         if com_zinput.STALIT[IC] > 0.50:
-                            TIPSDG[0] = 700.0       # FIX 6: first stall-guess tip-speed
+                            com_zinput.DTS[IC] = 0.0   # Fortran sets DTS=0 for stall mode
+                            TIPSDG[0] = 700.0
                             TIPSPD    = 700.0
+                            BHPG[:]   = 0.0
+                            THRSTG[:] = 0.0
                         else:
                             TIPSPD = com_zinput.TS[IC] - com_zinput.DTS[IC]
 
                         for ITS in range(NTS):
-                            TIPSPD += com_zinput.DTS[IC]
-                            
+                            TIPSPD += com_zinput.DTS[IC]   # adds 0 for stall mode
+
                             # MACH NUMBER AND ADVANCE RATIO J CALCULATION
-                            ZMS[0] = MACH_KTAS_FACTOR * com_zinput.VKTAS[IC] * FC[IC]      # freestream Mach
-                            ZMS[1] = TIPSPD * FC[IC] / SPEED_OF_SOUND                       # tip Mach
+                            ZMS[0] = MACH_KTAS_FACTOR * com_zinput.VKTAS[IC] * FC[IC]
+                            ZMS[1] = TIPSPD * FC[IC] / SPEED_OF_SOUND
                             ZM1 = ZMS[0]
-                            
+
                             ZJI = J_CONV * com_zinput.VKTAS[IC] / TIPSPD
-                            
+
                             if ZJI == 0.0:
                                 ZM1 = ZMS[1]
-                            
+
                             # Advance ratio limit check
                             if (com_zinput.STALIT[IC] <= 0.50 and ZJI > 5.0) or \
                                (com_zinput.STALIT[IC] > 0.50 and ZJI > 3.0):
                                 print(f" ADVANCE RATIO TOO HIGH = {ZJI:8.4f}")
                                 continue
-                            
-                            # ====================== 50% STALL ITERATION (when requested) ======================
+
+                            # ====================== 50% STALL ITERATION ======================
+                            # Fortran labels 169-201: log-linear secant on TIPSPD until
+                            # BHP (or THRUST) from perfm(IW=3) matches the operating value
+                            # within 0.5%.  Two initial guesses: 700 fps then 400 fps.
+                            stall_converged = False
                             if com_zinput.STALIT[IC] > 0.50:
+                                TIPSDG[ITS] = TIPSPD    # record tip speed at this iteration
                                 IWSV = IW
                                 IW = 3
                                 _afc, _cpe, _ast = state.as_afcor(), state.as_cpecte(), state.as_astrk()
                                 perfm(3, 0.0, ZJI, AFT, BLADT, CLI, 0.0, ZMS, 0,
                                       _afc, _cpe, _ast)
                                 state.sync_from_perfm(_afc, _cpe, _ast)
-                                IW = IWSV
-                                print(f"   → Stall iteration at tip speed = {TIPSPD:7.1f} fps")
-                                continue
+                                CP_stall = state.CPE
+                                CT_stall = state.CTE
+                                BLLLL    = state.BLLLL
+                                IW = IWSV   # restore original IW
+
+                                if IW == 1:   # Fortran label 711
+                                    BHPG[ITS] = (2.0 * TIPSDG[ITS]**3 * DIA**2 *
+                                                 RPM_FACTOR * CP_stall / (1e11 * RORO[IC]))
+                                    if abs(com_zinput.BHP[IC] - BHPG[ITS]) < 0.005 * com_zinput.BHP[IC]:
+                                        CP = CP_stall; CT = CT_stall; XFT = 1.0
+                                        THRUST_IC = (CT * TIPSPD**2 * DIA**2 *
+                                                     THRUST_CONV / (THRUST_DENOM * RORO[IC]))
+                                        TRIG = 1.0; stall_converged = True
+                                    elif ITS == 0:
+                                        TIPSDG[1] = 400.0; TIPSPD = TIPSDG[1]
+                                    else:
+                                        TIPSDG[ITS+1] = (
+                                            (np.log(com_zinput.BHP[IC]) - np.log(BHPG[ITS-1])) *
+                                            (TIPSDG[ITS] - TIPSDG[ITS-1]) /
+                                            (np.log(BHPG[ITS]) - np.log(BHPG[ITS-1]))
+                                            + TIPSDG[ITS-1])
+                                        TIPSPD = TIPSDG[ITS+1]
+
+                                else:   # IW == 2, Fortran label 712
+                                    THRSTG[ITS] = (TIPSDG[ITS]**2 * DIA**2 *
+                                                   THRUST_CONV * CT_stall / (THRUST_DENOM * RORO[IC]))
+                                    if abs(com_zinput.THRUST[IC] - THRSTG[ITS]) < 0.005 * com_zinput.THRUST[IC]:
+                                        TIPSPD = TIPSDG[ITS]
+                                        CP = CP_stall; CT = CT_stall; XFT = 1.0
+                                        BHP_IC = (CP * 2.0 * TIPSPD**3 * DIA**2 *
+                                                  RPM_FACTOR / (1e11 * RORO[IC]))
+                                        TRIG = 1.0; stall_converged = True
+                                    elif ITS == 0:
+                                        TIPSDG[1] = 400.0; TIPSPD = TIPSDG[1]
+                                    else:
+                                        TIPSDG[ITS+1] = (
+                                            (np.log(com_zinput.THRUST[IC]) - np.log(THRSTG[ITS-1])) *
+                                            (TIPSDG[ITS] - TIPSDG[ITS-1]) /
+                                            (np.log(THRSTG[ITS]) - np.log(THRSTG[ITS-1]))
+                                            + TIPSDG[ITS-1])
+                                        TIPSPD = TIPSDG[ITS+1]
+
+                                if not stall_converged:
+                                    if ITS == NTS - 1:
+                                        print(" FAILED STALL ITERATION")
+                                    continue   # next ITS; fall through only when converged
 
                             # ====================== NORMAL PERFORMANCE CALCULATION ======================
+                            # Skipped when stall converged (CP/CT/THRUST_IC or BHP_IC already set above)
                             IFIN = 0
-                            _afc, _cpe, _ast = state.as_afcor(), state.as_cpecte(), state.as_astrk()
+                            if not stall_converged:
+                                _afc, _cpe, _ast = state.as_afcor(), state.as_cpecte(), state.as_astrk()
 
-                            if IW == 1:
-                                CP = com_zinput.BHP[IC] * 1e11 * RORO[IC] / \
-                                     (2.0 * TIPSPD**3 * DIA**2 * RPM_FACTOR)
-                                IFIN = perfm(1, CP, ZJI, AFT, BLADT, CLI, 0.0, ZMS, 0,
-                                             _afc, _cpe, _ast)
-                                state.sync_from_perfm(_afc, _cpe, _ast)
-                                CP    = state.CPE
-                                CT    = state.CTE
-                                XFT   = state.XFT
-                                BLLLL = state.BLLLL
-                                THRUST_IC = (9999999999. if CT == state.ASTERK else
-                                             CT * TIPSPD**2 * DIA**2 /
-                                             (THRUST_DENOM * RORO[IC]) * THRUST_CONV * XFT)
+                                if IW == 1:
+                                    CP = com_zinput.BHP[IC] * 1e11 * RORO[IC] / \
+                                         (2.0 * TIPSPD**3 * DIA**2 * RPM_FACTOR)
+                                    IFIN = perfm(1, CP, ZJI, AFT, BLADT, CLI, 0.0, ZMS, 0,
+                                                 _afc, _cpe, _ast)
+                                    state.sync_from_perfm(_afc, _cpe, _ast)
+                                    CP    = state.CPE
+                                    CT    = state.CTE
+                                    XFT   = state.XFT
+                                    BLLLL = state.BLLLL
+                                    THRUST_IC = (9999999999. if CT == state.ASTERK else
+                                                 CT * TIPSPD**2 * DIA**2 /
+                                                 (THRUST_DENOM * RORO[IC]) * THRUST_CONV * XFT)
 
-                            elif IW == 2:
-                                CT = com_zinput.THRUST[IC] * THRUST_DENOM * RORO[IC] / \
-                                     (TIPSPD**2 * DIA**2 * THRUST_CONV)
-                                IFIN = perfm(2, 0.0, ZJI, AFT, BLADT, CLI, CT, ZMS, 0,
-                                             _afc, _cpe, _ast)
-                                state.sync_from_perfm(_afc, _cpe, _ast)
-                                CP    = state.CPE
-                                CT    = state.CTE
-                                XFT   = state.XFT
-                                BLLLL = state.BLLLL
-                                BHP_IC = (9999999999. if CP == state.ASTERK else
-                                          CP * 2.0 * TIPSPD**3 * DIA**2 /
-                                          (1e11 * RORO[IC]) * RPM_FACTOR)
+                                elif IW == 2:
+                                    CT = com_zinput.THRUST[IC] * THRUST_DENOM * RORO[IC] / \
+                                         (TIPSPD**2 * DIA**2 * THRUST_CONV)
+                                    IFIN = perfm(2, 0.0, ZJI, AFT, BLADT, CLI, CT, ZMS, 0,
+                                                 _afc, _cpe, _ast)
+                                    state.sync_from_perfm(_afc, _cpe, _ast)
+                                    CP    = state.CPE
+                                    CT    = state.CTE
+                                    XFT   = state.XFT
+                                    BLLLL = state.BLLLL
+                                    BHP_IC = (9999999999. if CP == state.ASTERK else
+                                              CP * 2.0 * TIPSPD**3 * DIA**2 /
+                                              (1e11 * RORO[IC]) * RPM_FACTOR)
 
                             # ====================== NOISE CALCULATION ======================
                             PNL = 0.0

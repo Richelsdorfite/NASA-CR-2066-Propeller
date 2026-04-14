@@ -572,12 +572,12 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
         BLLLL, _ = unint(4, XLB, BLLL, BLADT)
         if IW in (1, 3):
             CT, _ = unint(4, XLB, CTTT, BLADT)
-        else:
+        if IW != 1:   # IW=2: CP blade-interpolated; IW=3: use last IBB value (Fortran label 520)
             CP, _ = unint(4, XLB, CPPP, BLADT)
-    else:  # NBB == 1: no interpolation needed, just use the single computed value
+    else:  # NBB == 1: no blade interpolation — use single-family values
         if IW in (1, 3):
             CT = CTTT[0]
-        else:
+        if IW != 1:   # IW=2 and IW=3 both need CP (Fortran: CP set at label 287 before label 590)
             CP = CPPP[0]
 
     # ===================================================================
