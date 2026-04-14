@@ -343,11 +343,37 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
 
             # --- IW == 3: stall path ---
             if IW == 3:
-                # FIX 8: CTSTAL[L] / CPSTAL[L] (row = blade family)
-                CTT[K], _ = unint(9, ZJSTAL, CTSTAL[L], ZJJ[K])
+                # CPP[K] always from CPSTAL (stall power, used in CP secant at label 340).
                 CPP[K], _ = unint(9, ZJSTAL, CPSTAL[L], ZJJ[K])
-                # FIX 2: BLDANG[K] (row = J-group)
-                BLL[K], _ = unint(INN[K], CPANG[:, K, L], BLDANG[K], CPP[K])
+                # CT path: if input CP is non-zero (pre-computed by MAIN from BHP/thrust),
+                # use the IW=1 (CTANG) path — this matches the original Fortran fall-through
+                # from label 212 → 210 → 221 → 211 → 2501.
+                # If CP == 0, fall back to CTSTAL for CT (e.g. when MAIN cannot pre-compute CP).
+                if CP != 0.0:
+                    # Fortran fall-through: label 210 uses input CP for blade angle + CT
+                    CPE = CP * AFCP[K]
+                    PBL, _ = unint(14, CPEC, BLDCR[L], CPE)
+                    CPE1 = CPE * PBL * PFCLI[K]
+                    NNCLT = NCLT
+                    for KL in range(NCLT, NCLTT + 1):
+                        PXCLI[KL], lim = unint(NCLX[NNCLT], CPCLI[NNCLT], XPCLI[NNCLT], CPE1)
+                        if lim == 1:
+                            error_591 = True; break
+                        NNCLT += 1
+                    if error_591: break
+                    if NCL == 1:
+                        PCLI = PXCLI[NCLT]
+                    else:
+                        PCLI, _ = unint(4, CCLI[NCLT:NCLTT+1], PXCLI[NCLT:NCLTT+1], CLI)
+                    CPE = CPE * PCLI
+                    BLL[K], _ = unint(INN[K], CPANG[:, K, L], BLDANG[K], CPE)
+                    CTT[K], lim = unint(INN[K], BLDANG[K], CTANG[:, K, L], BLL[K])
+                    if lim != 0:
+                        error_591 = True; break
+                else:
+                    # Pure stall path: CT from CTSTAL, blade angle from stall CP
+                    CTT[K], _ = unint(9, ZJSTAL, CTSTAL[L], ZJJ[K])
+                    BLL[K], _ = unint(INN[K], CPANG[:, K, L], BLDANG[K], CPP[K])
 
             # --- IW == 1: power path ---
             elif IW == 1:

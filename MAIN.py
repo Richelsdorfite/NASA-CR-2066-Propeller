@@ -455,8 +455,16 @@ def main_loop():
                                 TIPSDG[ITS] = TIPSPD    # record tip speed at this iteration
                                 IWSV = IW
                                 IW = 3
+                                # Pre-compute CP from BHP (IW=1) or 0 (IW=2) at current tip speed.
+                                # For IW=1: PERFM fall-through uses this CP for CTANG-based CT.
+                                # For IW=2: CT comes from CTSTAL (pass CP=0 to keep pure stall path).
+                                if IWSV == 1:
+                                    CP_pre = (com_zinput.BHP[IC] * 1e11 * RORO[IC]
+                                              / (2.0 * TIPSPD**3 * DIA**2 * RPM_FACTOR))
+                                else:
+                                    CP_pre = 0.0
                                 _afc, _cpe, _ast = state.as_afcor(), state.as_cpecte(), state.as_astrk()
-                                perfm(3, 0.0, ZJI, AFT, BLADT, CLI, 0.0, ZMS, 0,
+                                perfm(3, CP_pre, ZJI, AFT, BLADT, CLI, 0.0, ZMS, 0,
                                       _afc, _cpe, _ast)
                                 state.sync_from_perfm(_afc, _cpe, _ast)
                                 CP_stall = state.CPE

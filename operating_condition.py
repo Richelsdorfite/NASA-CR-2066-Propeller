@@ -56,7 +56,8 @@ class OperatingCondition:
     STALIT: float = 0.0   # > 0.5 → iterate to 50 % stall tip speed
 
     # ── Cost ─────────────────────────────────────────────────────────────
-    DCOST: float = 0.0    # airplane category for weight/cost (1–5, 0 = skip)
+    DCOST: float = 0.0    # cost flag: 1 = compute weight/cost, 0 = skip
+                          # (aircraft category is set by WTCON in PropellerGeometry)
 
     # ── Reverse-thrust specific (IW = 3) ─────────────────────────────────
     RPMC:  float = 0.0    # full-throttle RPM for reverse thrust

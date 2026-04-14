@@ -270,6 +270,10 @@ class ConditionDialog(tk.Toplevel):
         self.STALIT = _lf(f, "Stall flag (>0.5=stall)", r); r += 1
         self.DCOST  = _lf(f, "Cost category (0=skip)",  r); r += 1
 
+        # Bind stall-mode toggle: disable/enable tip-speed sweep fields
+        self.STALIT.bind("<FocusOut>", lambda e: self._update_stall_mode())
+        self.STALIT.bind("<Return>",   lambda e: self._update_stall_mode())
+
         # ── Buttons ─────────────────────────────────────────────────
         bf = ttk.Frame(self); bf.pack(pady=8)
         ttk.Button(bf, text="  OK  ", command=self._ok).pack(side="left", padx=6)
@@ -293,9 +297,31 @@ class ConditionDialog(tk.Toplevel):
             _set(self.TS, 800.0);  _set(self.DTS, 50.0);    _set(self.NDTS, 5)
             _set(self.DIST, 500.0);_set(self.STALIT, 0.0);  _set(self.DCOST, 0.0)
 
+        # Apply initial stall-mode state (handles editing an existing stall condition)
+        self._update_stall_mode()
+
+    def _update_stall_mode(self):
+        """Gray out tip-speed sweep fields when stall iteration is active.
+
+        When STALIT > 0.5 the solver ignores TS, DTS, and NDTS entirely
+        (it forces DTS=0, NTS=10 and starts from 700 fps internally).
+        Disabling these fields prevents user confusion about which values matter.
+        """
+        stall = _get_float(self.STALIT) > 0.5
+        if stall:
+            # Set placeholder values (will be overridden by the solver)
+            _set(self.TS,   700.0)
+            _set(self.DTS,  0.0)
+            _set(self.NDTS, 1)
+        for w in (self.TS, self.DTS, self.NDTS):
+            w.configure(state="disabled" if stall else "normal")
+
     def _ok(self):
         iw = self.IW.current() + 1
         try:
+            # Re-enable tip-speed fields temporarily so _get_* can read them
+            for w in (self.TS, self.DTS, self.NDTS):
+                w.configure(state="normal")
             c = OperatingCondition(
                 IW=iw,
                 BHP=_get_float(self.BHP),       THRUST=_get_float(self.THRUST),
