@@ -1,10 +1,14 @@
 import numpy as np
-from typing import Tuple
+from typing import Callable, Tuple
 
 from BIQUAD import biquad       # 4-point slope-continuous interpolation
 from UNINT  import unint        # univariate slope-continuous interpolation
 from common    import CommonAFCOR, CommonCPECTE, CommonASTRK
 from constants import RHO_SCALE, RPM_FACTOR, THRUST_CONV, THRUST_DENOM
+
+# Message emitter – replaced by MAIN.set_collector() when an HMI collector
+# is active; defaults to print() for CLI / standalone use.
+_emit_fn: Callable[[str], None] = print
 
 
 # ================================================================
@@ -444,7 +448,7 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
                             CTA[KJ+1] = (-CTA1[KJ-1] * (CTA[KJ] - CTA[KJ-1])
                                          / (CTA1[KJ] - CTA1[KJ-1]) + CTA[KJ-1])
                     else:
-                        print(' INTEGRATED DESIGN CL ADJUSTMENT NOT WORKING PROPERLY FOR CT DEFINITION')
+                        _emit_fn(' INTEGRATED DESIGN CL ADJUSTMENT NOT WORKING PROPERLY FOR CT DEFINITION')
                     if error_591: break
                     CTN[KL] = CTA[NFTX] / XFFT[KL]
                     NNCLT += 1
@@ -580,7 +584,7 @@ def perfm(IW: int, CP: float, ZJI: float, AFT: float, BLADT: float,
                 CPG[IL+1] = (-CPG1[IL-1] * (CPG[IL] - CPG[IL-1])
                              / (CPG1[IL] - CPG1[IL-1]) + CPG[IL-1])
         else:
-            print(' INTEGRATED DESIGN CL ADJUSTMENT NOT WORKING PROPERLY FOR CP DEFINITION')
+            _emit_fn(' INTEGRATED DESIGN CL ADJUSTMENT NOT WORKING PROPERLY FOR CP DEFINITION')
         CPPP[IBB] = CP_iter   # label 287
 
         if error_591:

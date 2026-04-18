@@ -56,12 +56,14 @@ condition2 = OperatingCondition(
 )
 
 collector = ResultsCollector()
-main_module._collector = collector
+main_module.set_collector(collector)
 call_input([condition1, condition2], geometry)
 
 print("\nRunning main loop...\n")
-with collector.capture_stdout():
+try:
     main_loop()
+finally:
+    main_module.set_collector(None)
 
 print("\n" + "="*80)
 print("CONDITION N° 1 RESULTS (Verification)")

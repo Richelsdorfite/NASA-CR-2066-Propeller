@@ -14,6 +14,7 @@ from constants import (RHO_SCALE, RPM_FACTOR, THRUST_CONV, THRUST_DENOM,
                         SPEED_OF_SOUND, J_CONV, MACH_KTAS_FACTOR,
                         T0_RANKINE, T0_ISA, T_TROPO, LAPSE_RATE, TROPO_ALT,
                         RPM_FROM_TIPSPD)
+from units import FT_TO_M, FPS_TO_MS, HP_TO_KW, LBF_TO_N, LB_TO_KG, FTLBF_TO_NM
 from operating_condition import (OperatingCondition, PropellerGeometry,
                                   load_conditions)
 
@@ -83,6 +84,7 @@ class PropellerState:
     ALT:    List[float] = field(default_factory=lambda: [0.0] * 10)
     VKTAS:  List[float] = field(default_factory=lambda: [0.0] * 10)
     T:      List[float] = field(default_factory=lambda: [0.0] * 10)
+    DT_ISA: List[float] = field(default_factory=lambda: [0.0] * 10)  # ISA deviation °F/°R
     TS:     List[float] = field(default_factory=lambda: [0.0] * 10)
     IWIC:   List[int]   = field(default_factory=lambda: [0]   * 10)
     DTS:    List[float] = field(default_factory=lambda: [0.0] * 10)
@@ -149,10 +151,36 @@ com_cpecte = state    # /CPECTE/ fields live on state
 com_astrk  = state    # /ASTRK/  fields live on state
 
 # ── Results collector hook ────────────────────────────────────────────────
-# Set this to a ResultsCollector instance before calling main_loop() to
-# receive structured ResultRow objects directly (used by HMI.py).
+# Use set_collector() to attach / detach a ResultsCollector.
 # Leave as None for command-line / plain-text use.
 _collector = None   # type: ignore
+
+# Unit system for log/display output.  Set to "SI" by HMI.py before calling
+# main_loop() when the user has selected SI units.  The computation itself
+# always runs in US customary units; only the log lines are converted.
+_unit_system: str = "US"
+
+
+def _emit(text: str) -> None:
+    """Send a message to the active collector (HMI) or stdout (CLI)."""
+    if _collector is not None:
+        _collector.add_message(text)
+    else:
+        print(text)
+
+
+def set_collector(collector) -> None:
+    """Attach (or detach when None) a ResultsCollector for the current run.
+
+    Also wires up the message emitters in PERFM and REVTHT so that their
+    diagnostic prints reach the same destination without redirecting stdout.
+    """
+    global _collector
+    import PERFM, REVTHT
+    _collector = collector
+    emitter = collector.add_message if collector is not None else print
+    PERFM._emit_fn  = emitter
+    REVTHT._emit_fn = emitter
 # Allows RORO[IC], FC[IC] etc. without changing any loop body.
 FC     = state.FC
 RORO   = state.RORO
@@ -211,11 +239,11 @@ def call_input(conditions: List[OperatingCondition],
 
 def print_header():
     """Prints the exact same banner as the original Fortran program"""
-    print("\n" + "="*80)
-    print(" " * 19 + "HAMILTON STANDARD COMPUTER DECK NO. H432")
-    print(" " * 17 + "COMPUTES PERFORMANCE, NOISE, WEIGHT, AND COST FOR")
-    print(" " * 26 + "GENERAL AVIATION PROPELLERS")
-    print("="*80 + "\n")
+    _emit("\n" + "="*80)
+    _emit(" " * 19 + "HAMILTON STANDARD COMPUTER DECK NO. H432")
+    _emit(" " * 17 + "COMPUTES PERFORMANCE, NOISE, WEIGHT, AND COST FOR")
+    _emit(" " * 26 + "GENERAL AVIATION PROPELLERS")
+    _emit("="*80 + "\n")
 
 
 # ======================  MAIN EXECUTION STARTS HERE  ======================
@@ -249,28 +277,28 @@ def main_loop():
         
         # IW error check
         if IW > 3:
-            print(f"INPUT ERROR, IW= {IW} IC= {IC+1}")
+            _emit(f"INPUT ERROR, IW= {IW} IC= {IC+1}")
             continue
         
         # ===================================================================
         # DENSITY RATIO CALCULATION (lines ~100–180)
         # ===================================================================
         
-        # Temperature handling
+        # Temperature handling – T_RANKINE is local; com_zinput.T[IC] (user's
+        # °F input) is never overwritten so repeated Run clicks stay correct.
         temp_f = com_zinput.T[IC]
         if temp_f <= 0.0:
+            # ISA standard day + optional hot/cold offset (DT_ISA, °F = °R delta)
             alt_ft = com_zinput.ALT[IC]
             if alt_ft <= 36000.0:
-                temp_f = T0_ISA - LAPSE_RATE * alt_ft
+                T_RANKINE = T0_ISA - LAPSE_RATE * alt_ft + com_zinput.DT_ISA[IC]
             else:
-                temp_f = T_TROPO
+                T_RANKINE = T_TROPO + com_zinput.DT_ISA[IC]
         else:
-            temp_f = temp_f + 459.69   # convert °F to Rankine
-        
-        com_zinput.T[IC] = temp_f
-        
+            T_RANKINE = temp_f + 459.69   # convert user-specified °F to Rankine
+
         TO = T0_RANKINE
-        TOT = TO / temp_f
+        TOT = TO / T_RANKINE
         FC[IC] = np.sqrt(TOT)          # temperature correction factor
         
         # Pressure ratio from standard atmosphere table
@@ -288,7 +316,7 @@ def main_loop():
         # in the next blocks (Block 5 and following).
         
         # For now we just process one operating condition at a time.
-        print(f"Processing operating condition {IC+1} (IW={IW}) - "
+        _emit(f"Processing operating condition {IC+1} (IW={IW}) - "
               f"Altitude={com_zinput.ALT[IC]:.0f} ft, "
               f"Density ratio={RORO[IC]:.6f}")
 
@@ -301,23 +329,22 @@ def main_loop():
         
         # Special header for reverse thrust (IW == 3)
         if IW == 3:
-            print("\n" + " " * 21 + "REVERSE THRUST COMPUTATION")
+            _emit("\n" + " " * 21 + "REVERSE THRUST COMPUTATION")
             if com_zinput.ROT == 1.0:
-                print(" " * 27 + "TURBINE ENGINE")
+                _emit(" " * 24 + "RECIPROCATING ENGINE")
             else:
-                # FIX 4: indented correctly under else
-                print(" " * 24 + "RECIPROCATING ENGINE")
-            print(f" " * 22 + f"FULL THROTTLE SHP   = {com_zinput.BHP[IC]:6.0f}")
-            print(f" " * 22 + f"FULL THROTTLE RPM = {com_zinput.RPMC[IC]:6.0f}")
-            print(f" " * 22 + f"TOUCH DOWN V-KNOTS = {com_zinput.ANDVK[IC]:6.0f}")
-            print(f" " * 22 + f"ALTITUDE FEET     = {com_zinput.ALT[IC]:6.0f}")
-            print(f" " * 22 + f"TEMPERATURE RANKINE= {com_zinput.T[IC]:6.0f}\n")
+                _emit(" " * 27 + "TURBINE ENGINE")
+            _emit(" " * 22 + f"FULL THROTTLE SHP   = {com_zinput.BHP[IC]:6.0f}")
+            _emit(" " * 22 + f"FULL THROTTLE RPM = {com_zinput.RPMC[IC]:6.0f}")
+            _emit(" " * 22 + f"TOUCH DOWN V-KNOTS = {com_zinput.ANDVK[IC]:6.0f}")
+            _emit(" " * 22 + f"ALTITUDE FEET     = {com_zinput.ALT[IC]:6.0f}")
+            _emit(" " * 22 + f"TEMPERATURE RANKINE= {T_RANKINE:6.0f}\n")
             # FIX 5: Fortran falls through from label 2000 → label 270 (AF loop).
             # Do NOT return here – the AF loop below runs for IW==3 as well.
 
         else:
             # Normal forward-flight header (only for IW != 3)
-            print("\n" + " " * 18 + "OPERATING CONDITION\n")
+            _emit("\n" + " " * 18 + "OPERATING CONDITION\n")
 
             # Cost/weight header (if requested)
             if NCOST == 1:
@@ -331,11 +358,11 @@ def main_loop():
                     0.0, 0.0, 0.0, 0.0,  # CCLF1, CCLF, CCK70, CCK80 (will be set)
                     1)  # IENT=1 for initialization
                 if IW == 1:
-                    print(f" SHP   = {com_zinput.BHP[IC]:7.0f}   "
+                    _emit(f" SHP   = {com_zinput.BHP[IC]:7.0f}   "
                           f"NO. OF ENGINES = {com_zinput.XNOE:5.0f}   "
                           f"UNIT FACTOR L.C.   = {com_zinput.CLF1:5.2f}")
                 else:
-                    print(f" THRUST = {com_zinput.THRUST[IC]:7.0f}   "
+                    _emit(f" THRUST = {com_zinput.THRUST[IC]:7.0f}   "
                           f"NO. OF ENGINES = {com_zinput.XNOE:5.0f}   "
                           f"UNIT FACTOR L.C.   = {com_zinput.CLF1:5.2f}")
             else:
@@ -343,17 +370,17 @@ def main_loop():
                 CCLF = 0.0
                 # Normal header without cost
                 if IW == 1:
-                    print(f" SHP   = {com_zinput.BHP[IC]:7.0f}   "
+                    _emit(f" SHP   = {com_zinput.BHP[IC]:7.0f}   "
                           f"NO. OF ENGINES = {com_zinput.XNOE:5.0f}")
                 else:
-                    print(f" THRUST = {com_zinput.THRUST[IC]:7.0f}   "
+                    _emit(f" THRUST = {com_zinput.THRUST[IC]:7.0f}   "
                           f"NO. OF ENGINES = {com_zinput.XNOE:5.0f}")
 
-            print(f" ALT-FT = {com_zinput.ALT[IC]:7.0f}   "
+            _emit(f" ALT-FT = {com_zinput.ALT[IC]:7.0f}   "
                   f"DESIGN FLIGHT M.={com_zinput.ZMWT:5.3f}")
-            print(f" V-KTAS = {com_zinput.VKTAS[IC]:7.1f}   "
+            _emit(f" V-KTAS = {com_zinput.VKTAS[IC]:7.1f}   "
                   f"CLASSIFICATION = {com_zinput.WTCON:5.0f}")
-            print(f" TEMP R = {com_zinput.T[IC]:7.0f}   "
+            _emit(f" TEMP R = {T_RANKINE:7.0f}   "
                   f"FIELD POINT FT = {com_zinput.DIST[IC]:5.0f}\n")
         
         # ======================  AF LOOP STARTS HERE  ======================
@@ -362,13 +389,13 @@ def main_loop():
             
             # Range check (AF must be between 80 and 200)
             if not (80.0 <= AFT <= 200.0):
-                print(f" ILLEGAL ACTIVITY FACTOR = {AFT:8.1f}")
+                _emit(f" ILLEGAL ACTIVITY FACTOR = {AFT:8.1f}")
                 continue
             
             # The inner loops (C_Li, Blades, Diameter, Tip-speed) will be added
             # in the following blocks.
             # For now we just print the current AF value for visibility.
-            print(f" → Current Activity Factor = {AFT:6.1f}")
+            _emit(f" → Current Activity Factor = {AFT:6.1f}")
             
             # ====================== C_Li LOOP (Block 6) ======================
             NCLI = int(com_zinput.ZNCLI + 0.1)      # equivalent to ZNCLI + .1
@@ -379,11 +406,11 @@ def main_loop():
                 
                 # Range check for C_Li (0.3 to 0.8)
                 if not (0.29999 <= CLI <= 0.80001):
-                    print(f" ILLEGAL INTEGRATED DESIGN CL = {CLI:5.3f}")
+                    _emit(f" ILLEGAL INTEGRATED DESIGN CL = {CLI:5.3f}")
                     continue
                 
                 # CLI is valid - continue to next nested loops (Blades, Diameter, Tip-speed)
-                print(f"   → Current C_Li = {CLI:5.3f}")
+                _emit(f"   → Current C_Li = {CLI:5.3f}")
                 
                             # ====================== BLADES LOOP (Block 7) ======================
                 BLADT = com_zinput.BLADN - com_zinput.DBLAD
@@ -393,10 +420,10 @@ def main_loop():
                     
                     # Range check for number of blades (2 to 8)
                     if not (2.0 <= BLADT <= 8.0):
-                        print(f" ILLEGAL NO. OF BLADES = {BLADT:8.1f}")
+                        _emit(f" ILLEGAL NO. OF BLADES = {BLADT:8.1f}")
                         continue
                     
-                    print(f"     → Current Blades = {BLADT:3.0f}")
+                    _emit(f"     → Current Blades = {BLADT:3.0f}")
                     
                     # Next block (Diameter loop) will be inserted here
                     # (Block 8)
@@ -405,12 +432,32 @@ def main_loop():
                     
                     for ID in range(int(com_zinput.ND)):
                         DIA += com_zinput.DD
-                        
+
                         # Range check is not needed for diameter (no hard limit in original code)
-                        print(f"       → Current Diameter = {DIA:6.2f} ft")
-                        
-                        # The innermost Tip-speed / stall loop (Block 9) will be inserted here
-                                    # ====================== TIP-SPEED / STALL LOOP (Block 9) ======================
+                        _emit(f"       → Current Diameter = {DIA:6.2f} ft")
+
+                        # ── Fortran: IF (IW.EQ.3) GO TO 3000 ────────────────────────────────
+                        # For reverse thrust (IW=3) bypass the tip-speed loop entirely and
+                        # call REVTHT once per power-setting step (Fortran labels 3000–3900).
+                        if IW == 3:
+                            CP = 0.0
+                            IRT   = com_zinput.NPCPW[IC]
+                            PCPWC = com_zinput.PCPW[IC]
+                            for _ in range(IRT):
+                                if com_zinput.RTC == 1.0:
+                                    # Compute CP from BHP / RPM (Fortran label 3100)
+                                    CP = (com_zinput.BHP[IC] * PCPWC * RORO[IC] * 1e11
+                                          / (2.0 * com_zinput.RPMC[IC]**3 * DIA**5 * 100.0))
+                                revtht(com_zinput.RTC, com_zinput.ROT,
+                                       AFT, CLI, BLADT, DIA,
+                                       CP, com_zinput.BETA[IC], RORO[IC],
+                                       com_zinput.BHP[IC], com_zinput.RPMC[IC],
+                                       PCPWC, com_zinput.ANDVK[IC],
+                                       IC=IC + 1, collector=_collector)
+                                PCPWC += com_zinput.DPCPW[IC]
+                            continue   # next diameter (Fortran falls through to label 800)
+
+                        # ====================== TIP-SPEED / STALL LOOP (Block 9) ======================
                         # NTS is set earlier in the operating condition block
                         NTS = int(com_zinput.NDTS[IC]) if com_zinput.STALIT[IC] <= 0.50 else 10
 
@@ -443,7 +490,7 @@ def main_loop():
                             # Advance ratio limit check
                             if (com_zinput.STALIT[IC] <= 0.50 and ZJI > 5.0) or \
                                (com_zinput.STALIT[IC] > 0.50 and ZJI > 3.0):
-                                print(f" ADVANCE RATIO TOO HIGH = {ZJI:8.4f}")
+                                _emit(f" ADVANCE RATIO TOO HIGH = {ZJI:8.4f}")
                                 continue
 
                             # ====================== 50% STALL ITERATION ======================
@@ -511,7 +558,7 @@ def main_loop():
 
                                 if not stall_converged:
                                     if ITS == NTS - 1:
-                                        print(" FAILED STALL ITERATION")
+                                        _emit(" FAILED STALL ITERATION")
                                     continue   # next ITS; fall through only when converged
 
                             # ====================== NORMAL PERFORMANCE CALCULATION ======================
@@ -595,20 +642,63 @@ def main_loop():
                             # ── Emit result (print + structured collector) ──────────
                             THRUST_out = THRUST_IC if IW == 1 else com_zinput.THRUST[IC]
                             SHP_out    = com_zinput.BHP[IC] if IW == 1 else BHP_IC
-                            print(f"         Diameter={DIA:6.2f}  TipSpd={TIPSPD:7.1f}  "
-                                  f"CP={CP:8.4f}  CT={CT:8.4f}  BLLLL={BLLLL:6.2f}  "
-                                  f"Thrust={THRUST_out:9.0f}  SHP={SHP_out:8.0f}  PNL={PNL:6.1f}")
+                            eta        = (ZJI * CT / CP) if CP != 0.0 else 0.0
+                            eff_str    = f"{eta*100:5.2f}%" if eta > 0.0 else "  — "
+                            # Propeller RPM and shaft torque
+                            RPM_prop      = TIPSPD * 60.0 / (np.pi * DIA)
+                            torque_ftlbf  = (SHP_out * 5252.11 / RPM_prop) if RPM_prop > 0.0 else 0.0
 
-                            # Print weight/cost breakdown if computed (grouped by technology, one line)
+                            # Convert dimensional values for log display
+                            _si = (_unit_system == "SI")
+                            log_dia    = DIA           * FT_TO_M     if _si else DIA
+                            log_vt     = TIPSPD        * FPS_TO_MS   if _si else TIPSPD
+                            log_thr    = THRUST_out    * LBF_TO_N    if _si else THRUST_out
+                            log_shp    = SHP_out       * HP_TO_KW    if _si else SHP_out
+                            log_torque = torque_ftlbf  * FTLBF_TO_NM if _si else torque_ftlbf
+                            d_u  = "m"     if _si else "ft"
+                            vt_u = "m/s"   if _si else "fps"
+                            t_u  = "N"     if _si else "lbf"
+                            p_u  = "kW"    if _si else "hp"
+                            q_u  = "N·m"   if _si else "ft·lbf"
+
+                            result_line = (
+                                f"         Diameter={log_dia:6.2f}{d_u}  TipSpd={log_vt:7.1f}{vt_u}  "
+                                f"CP={CP:8.4f}  CT={CT:8.4f}  Eff={eff_str}  "
+                                f"BLLLL={BLLLL:6.2f}  "
+                                f"Thrust={log_thr:9.0f}{t_u}  SHP={log_shp:8.0f}{p_u}"
+                                f"  Torque={log_torque:8.1f}{q_u}  PNL={PNL:6.1f}"
+                            )
+
+                            # Append weight/cost on the same line — one line per iteration
                             if NCOST == 1:
-                                cost_line = f"           Wt70={WT70:6.1f}lb  Wt80={WT80:6.1f}lb"
+                                wt_u = "kg" if _si else "lb"
+                                log_wt70 = WT70 * LB_TO_KG if _si else WT70
+                                log_wt80 = WT80 * LB_TO_KG if _si else WT80
                                 if QTY70_list:
-                                    # Add quantities and costs (first 4 levels)
-                                    for i in range(min(4, len(QTY70_list))):
-                                        cost_line += f"  |Qty70:{QTY70_list[i]:7.0f}/${COST70_list[i]:6.2f}"
-                                    for i in range(min(4, len(QTY80_list))):
-                                        cost_line += f"  |Qty80:{QTY80_list[i]:7.0f}/${COST80_list[i]:6.2f}"
-                                print(cost_line)
+                                    n = max(len(QTY70_list), len(QTY80_list))
+                                    for i in range(n):
+                                        q70 = QTY70_list[i]  if i < len(QTY70_list)  else 0.0
+                                        c70 = COST70_list[i] if i < len(COST70_list) else 0.0
+                                        q80 = QTY80_list[i]  if i < len(QTY80_list)  else 0.0
+                                        c80 = COST80_list[i] if i < len(COST80_list) else 0.0
+                                        if i == 0:
+                                            result_line += (
+                                                f"  Qty70={q70:8.0f}  Wt70={log_wt70:7.1f}{wt_u}"
+                                                f"  Cost70=${c70:9.2f}"
+                                                f"  Qty80={q80:8.0f}  Wt80={log_wt80:7.1f}{wt_u}"
+                                                f"  Cost80=${c80:9.2f}"
+                                            )
+                                        else:
+                                            result_line += (
+                                                f"  Qty70={q70:8.0f}  Cost70=${c70:9.2f}"
+                                                f"  Qty80={q80:8.0f}  Cost80=${c80:9.2f}"
+                                            )
+                                else:
+                                    result_line += (
+                                        f"  Wt70={log_wt70:7.1f}{wt_u}  Wt80={log_wt80:7.1f}{wt_u}"
+                                    )
+
+                            _emit(result_line)
 
                             # Feed structured row to HMI collector if attached
                             if _collector is not None:
@@ -627,8 +717,10 @@ def main_loop():
                                     mach_tip   = ZMS[1],
                                     mach_fs    = ZMS[0],
                                     ft         = XFT,
+                                    eta        = eta,
                                     thrust_lb  = THRUST_out,
                                     shp        = SHP_out,
+                                    torque     = torque_ftlbf,
                                     pnl_db     = PNL,
                                     wt70_lb    = WT70,
                                     wt80_lb    = WT80,
@@ -652,6 +744,143 @@ def main_loop():
                         if IFIN == 7710:
                             continue             # skip remaining tip-speeds, next diameter
                         ISTALL = 0              # FIX 7: stall flag (set to 2 by stall logic when converged)
+
+# ===================================================================
+# PROPELLER CHARACTERISTIC MAP
+# ===================================================================
+
+def run_map(conditions: List[OperatingCondition],
+            geometry:   PropellerGeometry,
+            ic_index:   int   = 0,
+            j_start:    float = 0.0,
+            j_end:      float = 1.4,
+            nj:         int   = 30):
+    """
+    Generate a propeller characteristic map (CP, CT, η vs J).
+
+    For each (AF, CLi, blades, diameter, tip-speed) combination in the
+    geometry sweep, PERFM is called at nj evenly-spaced J values.
+    CP is held fixed (derived from BHP[ic_index], Vt, D, RORO) — the
+    resulting CT(J) and η(J) = J·CT/CP curves are the map.
+
+    IW=3 (reverse thrust) conditions are not supported and raise ValueError.
+    Returns a MapResult (importable from output.py).
+    """
+    from output import MapPoint, MapCurve, MapResult
+
+    load_conditions(conditions, geometry, state)
+
+    IC = ic_index
+    IW = state.IWIC[IC]
+    if IW == 3:
+        raise ValueError("Propeller map is not available for IW=3 (reverse thrust).")
+
+    # ── Atmosphere for selected condition (mirrors main_loop) ─────────
+    temp_f = state.T[IC]
+    if temp_f <= 0.0:
+        alt_ft = state.ALT[IC]
+        if alt_ft <= TROPO_ALT:
+            T_RANKINE = T0_ISA - LAPSE_RATE * alt_ft + state.DT_ISA[IC]
+        else:
+            T_RANKINE = T_TROPO + state.DT_ISA[IC]
+    else:
+        T_RANKINE = temp_f + 459.69
+
+    TOT    = T0_RANKINE / T_RANKINE
+    FC_ic  = float(np.sqrt(TOT))
+    POP, _ = unint(11, ALTPR, PRESSR, state.ALT[IC])
+    RORO_ic = 1.0 / (POP * TOT)
+
+    # ── J axis ────────────────────────────────────────────────────────
+    j_step   = (j_end - j_start) / max(nj - 1, 1)
+    j_values = [j_start + i * j_step for i in range(nj)]
+
+    result = MapResult()
+
+    # ── Geometry sweep (mirrors the nested loops in main_loop) ────────
+    AFT = state.AF - state.DAF
+    for _ in range(int(state.NAF)):
+        AFT += state.DAF
+        if not (80.0 <= AFT <= 200.0):
+            continue
+
+        CLI = state.CLII - state.DCLI
+        for _ in range(int(state.ZNCLI)):
+            CLI += state.DCLI
+            if not (0.29999 <= CLI <= 0.80001):
+                continue
+
+            BLADT = state.BLADN - state.DBLAD
+            for _ in range(int(state.NBL)):
+                BLADT += state.DBLAD
+                if not (2.0 <= BLADT <= 8.0):
+                    continue
+
+                DIA = state.D - state.DD
+                for _ in range(int(state.ND)):
+                    DIA += state.DD
+
+                    TIPSPD = state.TS[IC] - state.DTS[IC]
+                    for _ in range(int(state.NDTS[IC])):
+                        TIPSPD += state.DTS[IC]
+
+                        # Fixed CP for this (BHP/THRUST, Vt, D, RORO)
+                        if IW == 1:
+                            CP_input = (state.BHP[IC] * 1e11 * RORO_ic /
+                                        (2.0 * TIPSPD**3 * DIA**2 * RPM_FACTOR))
+                        else:  # IW == 2
+                            # CT is fixed; CP starts as zero (PERFM IW=2 path)
+                            CT_input = (state.THRUST[IC] * THRUST_DENOM * RORO_ic /
+                                        (TIPSPD**2 * DIA**2 * THRUST_CONV))
+                            CP_input = 0.0
+
+                        # ── J sweep ──────────────────────────────────
+                        points = []
+                        for J in j_values:
+                            if J > 5.0:
+                                break  # beyond PERFM table range
+
+                            # Mach numbers at this J/airspeed
+                            V_ktas = J * TIPSPD / J_CONV
+                            ZMS_map = np.zeros(2)
+                            ZMS_map[1] = TIPSPD * FC_ic / SPEED_OF_SOUND
+                            ZMS_map[0] = (ZMS_map[1] if J == 0.0
+                                          else MACH_KTAS_FACTOR * V_ktas * FC_ic)
+
+                            _afc = state.as_afcor()
+                            _cpe = state.as_cpecte()
+                            _ast = state.as_astrk()
+
+                            if IW == 1:
+                                perfm(1, CP_input, J, AFT, BLADT, CLI, 0.0,
+                                      ZMS_map, 0, _afc, _cpe, _ast)
+                            else:
+                                perfm(2, 0.0, J, AFT, BLADT, CLI, CT_input,
+                                      ZMS_map, 0, _afc, _cpe, _ast)
+                            state.sync_from_perfm(_afc, _cpe, _ast)
+
+                            off = (state.CPE >= state.ASTERK or
+                                   state.CTE >= state.ASTERK)
+                            if off:
+                                points.append(MapPoint(j=J, off_chart=True))
+                            else:
+                                CP_out = state.CPE
+                                CT_out = state.CTE
+                                eta    = (J * CT_out / CP_out
+                                          if CP_out > 0.0 and J > 0.0 else 0.0)
+                                points.append(MapPoint(
+                                    j=J, cp=CP_out, ct=CT_out, eta=eta,
+                                    blade_ang=state.BLLLL))
+
+                        label = (f"{BLADT:.0f}bl  AF={AFT:.0f}"
+                                 f"  CLi={CLI:.2f}"
+                                 f"  D={DIA:.1f}ft  Vt={TIPSPD:.0f}fps")
+                        result.curves.append(MapCurve(
+                            label=label, blades=BLADT, af=AFT, cli=CLI,
+                            dia_ft=DIA, vt_fps=TIPSPD, points=points))
+
+    return result
+
 
 # ===================================================================
 # Run the program

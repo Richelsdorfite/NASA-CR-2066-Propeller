@@ -20,7 +20,7 @@ THRUST_CONV: float = 364.76
 
 # Thrust coefficient denominator constant
 THRUST_DENOM: float = 1.515e6   # used in CT → thrust (lbf) conversion in MAIN
-THRUST_DENOM_REV: float = 1.514e5  # slightly different value used in REVTHT
+THRUST_DENOM_REV: float = 1.514e6  # = 3600/rho0 ≈ 3600/0.002378; used in REVTHT
 
 # ── Atmosphere / speed ───────────────────────────────────────────────────
 # Speed of sound at sea level, standard day (ft/s) used for Mach number

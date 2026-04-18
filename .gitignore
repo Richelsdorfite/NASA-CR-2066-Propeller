@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# uv lock / build artefacts
+uv.lock
+*.egg-info/
+dist/
+build/
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / IDE
+.vscode/
+launch.json
+*.swp
+*.swo
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Saved results produced at runtime (not source)
+*.csv
+*.json
+*.txt

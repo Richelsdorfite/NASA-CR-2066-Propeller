@@ -1,0 +1,13 @@
+[project]
+name = "propeller-h432"
+version = "3.0.0"
+description = "NASA CR-2066 Hamilton Standard H432 propeller design tool"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "matplotlib",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-q --tb=short"

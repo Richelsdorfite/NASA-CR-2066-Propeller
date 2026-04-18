@@ -51,7 +51,7 @@ def wait(WTCON: float, ZMWT: float, BHP: float, DIA: float,
 
     elif IWTCON == 4:        # Category IV
         WTFAC = WTFAC * ZK4**0.7 * ZK5**0.4
-        WT70 = 270.0 * WTFAC + ZC * (5.0 / 3.5)
+        WT70 = 220.0 * WTFAC + ZC * (5.0 / 3.5)
         WT80 = 190.0 * WTFAC + ZC
 
     elif IWTCON == 5:        # Category V

@@ -42,7 +42,9 @@ class OperatingCondition:
     # ── Flight condition ─────────────────────────────────────────────────
     ALT:   float = 0.0    # altitude, feet (0 – 100 000)
     VKTAS: float = 0.0    # true airspeed, knots (≥ 0)
-    T:     float = 0.0    # temperature, °F  (≤0 → compute from standard atmosphere)
+    T:      float = 0.0    # temperature, °F  (≤0 → compute from standard atmosphere)
+    DT_ISA: float = 0.0    # ISA temperature deviation, °F (+ hot day, – cold day)
+                            # applied only when T ≤ 0 (ISA day)
 
     # ── Tip-speed sweep ──────────────────────────────────────────────────
     TS:    float = 0.0    # starting tip speed, ft/s
@@ -111,7 +113,8 @@ class PropellerGeometry:
     ND:   int    # number of diameters
 
     # ── Activity-factor sweep ─────────────────────────────────────────────
-    AF:   float  # starting activity factor   (80 – 200)
+    AF:   float  # starting blade activity factor BAF, per blade  (80 – 200)
+                 # TAF (total propeller) = BAF × number of blades
     DAF:  float  # AF increment
     NAF:  int    # number of AF values
 
@@ -140,13 +143,13 @@ class PropellerGeometry:
     NAMT:  int   = 1     # number of quantity breakpoints
 
     # ── Reverse-thrust engine type ────────────────────────────────────────
-    RTC:   float = 0.0   # reverse-thrust control flag
-    ROT:   float = 0.0   # 1.0 = turbine, else reciprocating
+    RTC:   float = 0.0   # reverse-thrust control flag: 1.0 = compute β from CP, 2.0 = β given
+    ROT:   float = 0.0   # engine type: 1.0 = reciprocating, 2.0 = turbine
 
     def validate(self) -> None:
         """Raise ValueError for out-of-range geometry parameters."""
         if not (80.0 <= self.AF <= 200.0):
-            raise ValueError(f"AF={self.AF} out of range [80, 200]")
+            raise ValueError(f"BAF (per blade)={self.AF} out of range [80, 200]")
         if not (2.0 <= self.BLADN <= 8.0):
             raise ValueError(f"BLADN={self.BLADN} out of range [2, 8]")
         if not (0.3 <= self.CLII <= 0.8):
@@ -204,6 +207,7 @@ def load_conditions(conditions: List[OperatingCondition],
         state.ALT[IC]   = cond.ALT
         state.VKTAS[IC] = cond.VKTAS
         state.T[IC]     = cond.T
+        state.DT_ISA[IC]= cond.DT_ISA
         state.TS[IC]    = cond.TS
         state.DTS[IC]   = cond.DTS
         state.NDTS[IC]  = cond.NDTS

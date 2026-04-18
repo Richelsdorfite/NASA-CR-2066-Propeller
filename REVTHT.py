@@ -1,9 +1,13 @@
 import numpy as np
-from typing import Tuple
+from typing import Callable, Tuple
 
 from BIQUAD import biquad       # 4-point slope-continuous interpolation
 from UNINT     import unint
 from constants import RHO_SCALE, SPEED_OF_SOUND, VK_CONV, THRUST_DENOM_REV        # univariate slope-continuous interpolation
+
+# Message emitter – replaced by MAIN.set_collector() when an HMI collector
+# is active; defaults to print() for CLI / standalone use.
+_emit_fn: Callable[[str], None] = print
 
 # ================================================================
 # MODULE-LEVEL DATA TABLES (built once at import time)
@@ -104,7 +108,8 @@ def _cbrt(x: float) -> float:
 
 def revtht(RTC: float, ROT: float, AFT: float, CLI: float, BLADN: float,
            DIA: float, CP: float, THETA: float, RORO: float,
-           BHPI: float, RPMI: float, PCPWC: float, ANDVK: float) -> Tuple[float, float]:
+           BHPI: float, RPMI: float, PCPWC: float, ANDVK: float,
+           IC: int = 0, collector=None) -> Tuple[float, float]:
     """
     Exact translation of SUBROUTINE REVTHT (NASA CR-2066)
     Computes reverse-thrust blade angle and full performance table.
@@ -148,13 +153,13 @@ def revtht(RTC: float, ROT: float, AFT: float, CLI: float, BLADN: float,
         CP_val = (CQP + PCCH * DCQPP) * 6.2832 / (QAF * (3.0 / BLADN)**0.83)
         CT_val = (CTP + PCCH * DCTPP) / (TAF * (3.0 / BLADN)**0.83)
 
-        if ROT != 1.0:                     # normal rotation case
+        if ROT == 1.0:                     # reciprocating engine: torque-ratio / sqrt RPM
             CONST = BHPI / RPMI * PCPWC / 100.0
             RPMC[I] = np.sqrt(RHO_SCALE * RORO * CONST / (2.0 * DIA**5 * CP_val))
             if RPMC[I] > RPMI and RTC != 2.0:
                 RPMC[I] = RPMI
             BHPC[I] = CONST * RPMC[I]
-        else:                              # special rotation case
+        else:                              # turbine engine: fixed power / cbrt RPM
             BHPC[I] = BHPI * PCPWC / 100.0
             CONST1 = RHO_SCALE * BHPC[I] * RORO / (2.0 * DIA**5 * CP_val)
             RPMC[I] = _cbrt(CONST1)
@@ -174,11 +179,11 @@ def revtht(RTC: float, ROT: float, AFT: float, CLI: float, BLADN: float,
             CP_val = (QCP) * 6.2832 / (QAF * (3.0 / BLADN)**0.83) / TJ**2
             CT_val = (TCP) / (TAF * (3.0 / BLADN)**0.83) / TJ**2
 
-            if ROT != 1.0:
+            if ROT == 1.0:                 # reciprocating engine
                 CONST = BHPI / RPMI * PCPWC / 100.0
                 RPMC[I] = np.sqrt(RHO_SCALE * RORO * CONST / (2.0 * DIA**5 * CP_val))
                 BHPC[I] = CONST * RPMC[I]
-            else:
+            else:                          # turbine engine
                 BHPC[I] = BHPI * PCPWC / 100.0
                 CONST1 = RHO_SCALE * BHPC[I] * RORO / (2.0 * DIA**5 * CP_val)
                 RPMC[I] = _cbrt(CONST1)
@@ -198,8 +203,8 @@ def revtht(RTC: float, ROT: float, AFT: float, CLI: float, BLADN: float,
     TRIG = 0.0
     VK = 0.0
 
-    print("\nREVERSE THRUST PERFORMANCE TABLE")
-    print("DIA     PCPWC   THETA    VK     THRUST   SHP     RPM")
+    _emit_fn("\nREVERSE THRUST PERFORMANCE TABLE")
+    _emit_fn("DIA     PCPWC   THETA    VK     THRUST   SHP     RPM")
 
     for I in range(NOUNT):
         SHPV, _ = unint(NNJ, VKC[:NNJ], BHPC[:NNJ], VK)
@@ -213,10 +218,20 @@ def revtht(RTC: float, ROT: float, AFT: float, CLI: float, BLADN: float,
 
         # FIX 3: column widths match Fortran FORMAT 92: F10.1,F9.0,F9.1,F8.1,F9.0,F8.0,F7.0
         if I == 0:
-            print(f"{DIA:10.1f}{PCPWC:9.0f}{THETA:9.1f}{VK:8.1f}{THRSTV:9.0f}{SHPV:8.0f}{RPMV:7.0f}")
+            _emit_fn(f"{DIA:10.1f}{PCPWC:9.0f}{THETA:9.1f}{VK:8.1f}{THRSTV:9.0f}{SHPV:8.0f}{RPMV:7.0f}")
         else:
             # FIX 3: Fortran FORMAT 96: 2X,F8.1,F9.0,F8.0,F7.0
-            print(f"  {VK:8.1f}{THRSTV:9.0f}{SHPV:8.0f}{RPMV:7.0f}")
+            _emit_fn(f"  {VK:8.1f}{THRSTV:9.0f}{SHPV:8.0f}{RPMV:7.0f}")
+
+        # Emit structured row to the HMI collector (if present)
+        if collector is not None:
+            from output import RevThrustRow
+            torque_ftlbf = (SHPV * 5252.11 / RPMV) if RPMV > 0.0 else 0.0
+            collector.add_rev_row(RevThrustRow(
+                condition=IC, blades=BLADN, af=AFT, cli=CLI, dia_ft=DIA,
+                pcpw=PCPWC, theta_deg=THETA, vk_kts=VK,
+                thrust_lb=THRSTV, shp=SHPV, torque=torque_ftlbf, rpm=RPMV,
+            ))
 
         if TRIG == 1.0:
             break
