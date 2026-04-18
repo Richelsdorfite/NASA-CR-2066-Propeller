@@ -134,10 +134,16 @@ Priority order: highest impact first.
   `collector.add_message()`. `output.py` cleaned up (removed `_StdoutCapture`,
   `capture_stdout()`, unused `sys` / `TextIO` imports).
 
-- [ ] **Eliminate global mutable state in `MAIN.py`**
-  `PropellerState` and `_collector` are module-level globals. Pass them as
-  function arguments instead. This will make parallel runs safe and simplify
-  unit testing of individual subroutines.
+- [x] **Eliminate global mutable state in `MAIN.py`**
+  Removed module-level `state`, `_collector`, `_unit_system`, `com_zinput`,
+  `com_afcor`, `com_cpecte`, `com_astrk`, `FC`, `RORO`, `ZMS` and all other
+  aliases.  `call_input()` now creates a fresh `PropellerState` and returns it;
+  `main_loop(state, collector=None, unit_system="US")` receives everything as
+  explicit arguments.  `run_map()` creates its own local state internally.
+  PERFM / REVTHT emitters wired per-call at the top of `main_loop()`.
+  `set_collector()` and `main_module._unit_system` removed from `HMI.py`.
+  Tests updated: `_run()` helpers use the returned state; T-mutation test
+  reads state from `call_input()` return value.  74 tests pass.
 
 - [ ] **Split `HMI.py` (1 664 lines) into focused modules**
   Suggested split:
@@ -167,8 +173,7 @@ Priority order: highest impact first.
   The five nested loops in `MAIN.py` (AF × CLi × blades × diameter × tip speed)
   run sequentially in Python. For large sweeps, use
   `concurrent.futures.ProcessPoolExecutor` — one worker per
-  (diameter × tip-speed) point — once global state has been eliminated (see
-  Architecture item above).
+  (diameter × tip-speed) point.  The global-state prerequisite is now met.
 
 ---
 
