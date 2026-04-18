@@ -5,6 +5,8 @@ and performance program, originally published as NASA Contractor Report 2066
 (1972).  The code covers all three computation modes of the original Fortran
 IV program and adds a modern graphical interface.
 
+![H432 HMI](docs/Geometry.png)
+
 ---
 
 ## What it does
@@ -81,6 +83,8 @@ python HMI.py
 3. Click **▶ Run**.
 4. Explore results in the **Results**, **Plot**, and **Map** tabs.
 5. Save with **💾 Save** (project) or **📤 Export** (CSV/JSON/TXT).
+
+![H432 HMI](docs/Operating_conditions.png)
 
 ### Command-line / scripting
 
