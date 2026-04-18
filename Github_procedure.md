@@ -181,7 +181,73 @@ git restore HMI.py
 
 ---
 
-## 5. Pre-commit hook (automated test gate)
+## 5. Feature branches (recommended workflow for new development)
+
+`master` stays stable and published at all times.  Every new feature, fix,
+or refactor gets its own branch, developed and tested in isolation, then
+merged back only when it is ready.
+
+### Branch naming conventions
+
+| Prefix | Used for | Example |
+|---|---|---|
+| `feature/` | New features from the TODO list | `feature/engine-database` |
+| `fix/` | Bug fixes | `fix/cost-formula` |
+| `refactor/` | Architecture work (no behaviour change) | `refactor/split-hmi` |
+| `test/` | Test additions only | `test/add-revtht-cases` |
+
+### Full feature branch lifecycle
+
+```bash
+# 1. Make sure master is up to date before branching
+git checkout master
+git pull
+
+# 2. Create and switch to the feature branch
+git checkout -b feature/engine-database
+
+# 3. Develop: commit as many times as needed on the branch
+git add <files>
+git commit -m "Add engine JSON schema and loader"
+git add <more files>
+git commit -m "Wire engine dropdown into ConditionDialog"
+
+# 4. Push the branch to GitHub (optional — for backup or collaboration)
+git push -u origin feature/engine-database
+
+# 5. When the feature is complete and all tests pass, merge to master
+git checkout master
+git merge feature/engine-database
+
+# 6. Push the updated master
+git push
+
+# 7. Delete the branch locally and on GitHub
+git branch -d feature/engine-database
+git push origin --delete feature/engine-database
+```
+
+### Useful branch commands
+
+```bash
+git branch              # list local branches (* = current)
+git branch -a           # list all branches including remote
+git checkout master     # switch back to master at any time
+git log --oneline --graph --all   # visualise branch history
+```
+
+### If master has moved on while you were working on a branch
+
+```bash
+# Rebase your branch on top of the latest master
+git checkout feature/engine-database
+git rebase master
+# Then merge as normal
+```
+
+---
+
+## 7. Pre-commit hook (automated test gate)
 
 This project has a pre-commit hook installed at `.git/hooks/pre-commit`
 that runs `pytest` before every commit.  If any test fails the commit is
@@ -203,7 +269,7 @@ To reinstall the hook after cloning on a new machine, copy
 
 ---
 
-## 6. Useful GitHub features to configure
+## 8. Useful GitHub features to configure
 
 After publishing, on the repository page:
 
