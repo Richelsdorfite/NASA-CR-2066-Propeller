@@ -20,20 +20,15 @@ aerodynamic quantities, 1 % for tabulated lookups, 2 % for noise/weight.
 import pytest
 from operating_condition import OperatingCondition, PropellerGeometry
 from output import ResultsCollector
-import MAIN as M
-from MAIN import call_input, main_loop, set_collector
+from MAIN import call_input, main_loop
 
 
 # ── helper ───────────────────────────────────────────────────────────────────
 
 def _run(conditions, geometry):
     col = ResultsCollector()
-    set_collector(col)
-    call_input(conditions, geometry)
-    try:
-        main_loop()
-    finally:
-        set_collector(None)
+    state = call_input(conditions, geometry)
+    main_loop(state, collector=col)
     return col
 
 

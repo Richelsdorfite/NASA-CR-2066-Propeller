@@ -138,59 +138,8 @@ class PropellerState:
         self.ASTERK = astrk.ASTERK
 
 
-# Single global program state – replaces com_afcor, com_astrk, com_cpecte,
-# com_zinput and the module-level work arrays
-state = PropellerState()
-
-# ── Convenience aliases so the rest of the code reads clearly ────────────
-# These let existing code like com_zinput.BHP[IC] keep working without a
-# global search-and-replace.  They are just names pointing at the same object.
-com_zinput = state    # /ZINPUT/ fields live on state
-com_afcor  = state    # /AFCOR/  fields live on state
-com_cpecte = state    # /CPECTE/ fields live on state
-com_astrk  = state    # /ASTRK/  fields live on state
-
-# ── Results collector hook ────────────────────────────────────────────────
-# Use set_collector() to attach / detach a ResultsCollector.
-# Leave as None for command-line / plain-text use.
-_collector = None   # type: ignore
-
-# Unit system for log/display output.  Set to "SI" by HMI.py before calling
-# main_loop() when the user has selected SI units.  The computation itself
-# always runs in US customary units; only the log lines are converted.
-_unit_system: str = "US"
-
-
-def _emit(text: str) -> None:
-    """Send a message to the active collector (HMI) or stdout (CLI)."""
-    if _collector is not None:
-        _collector.add_message(text)
-    else:
-        print(text)
-
-
-def set_collector(collector) -> None:
-    """Attach (or detach when None) a ResultsCollector for the current run.
-
-    Also wires up the message emitters in PERFM and REVTHT so that their
-    diagnostic prints reach the same destination without redirecting stdout.
-    """
-    global _collector
-    import PERFM, REVTHT
-    _collector = collector
-    emitter = collector.add_message if collector is not None else print
-    PERFM._emit_fn  = emitter
-    REVTHT._emit_fn = emitter
-# Allows RORO[IC], FC[IC] etc. without changing any loop body.
-FC     = state.FC
-RORO   = state.RORO
-ZMS    = state.ZMS
-CQUAN  = state.CQUAN
-COST70 = state.COST70
-COST80 = state.COST80
-BHPG   = state.BHPG
-THRSTG = state.THRSTG
-TIPSDG = state.TIPSDG
+# No module-level mutable state.  call_input() creates and returns a fresh
+# PropellerState; main_loop() and run_map() receive it as an explicit argument.
 
 # ===================================================================
 # BLOCK 2: DATA statements and statement function
@@ -212,14 +161,12 @@ def CBRT(x: float) -> float:
 # ===================================================================
 
 def call_input(conditions: List[OperatingCondition],
-               geometry:   PropellerGeometry) -> None:
+               geometry:   PropellerGeometry) -> PropellerState:
     """
     Replaces the Fortran CALL INPUT / perf-card reader.
 
-    The HMI builds a list of OperatingCondition objects and one
-    PropellerGeometry object, then calls this function once before
-    calling main_loop().  All fields are validated before the state
-    is modified.
+    Creates a fresh PropellerState, populates it from the supplied conditions
+    and geometry, and returns it.  Pass the returned state to main_loop().
 
     Example
     -------
@@ -231,19 +178,21 @@ def call_input(conditions: List[OperatingCondition],
     ...                          ZMWT=0.3)
     >>> conds = [OperatingCondition(IW=1, BHP=300.0, ALT=0.0, VKTAS=120.0,
     ...                              TS=800.0, DTS=50.0, NDTS=5)]
-    >>> call_input(conds, geom)
-    >>> main_loop()
+    >>> state = call_input(conds, geom)
+    >>> main_loop(state)
     """
-    load_conditions(conditions, geometry, state)
+    fresh = PropellerState()
+    load_conditions(conditions, geometry, fresh)
+    return fresh
 
 
 def print_header():
     """Prints the exact same banner as the original Fortran program"""
-    _emit("\n" + "="*80)
-    _emit(" " * 19 + "HAMILTON STANDARD COMPUTER DECK NO. H432")
-    _emit(" " * 17 + "COMPUTES PERFORMANCE, NOISE, WEIGHT, AND COST FOR")
-    _emit(" " * 26 + "GENERAL AVIATION PROPELLERS")
-    _emit("="*80 + "\n")
+    print("\n" + "="*80)
+    print(" " * 19 + "HAMILTON STANDARD COMPUTER DECK NO. H432")
+    print(" " * 17 + "COMPUTES PERFORMANCE, NOISE, WEIGHT, AND COST FOR")
+    print(" " * 26 + "GENERAL AVIATION PROPELLERS")
+    print("="*80 + "\n")
 
 
 # ======================  MAIN EXECUTION STARTS HERE  ======================
@@ -259,9 +208,40 @@ if __name__ == "__main__":
 #          + density ratio calculation
 # ===================================================================
 
-def main_loop():
-    """Main operating condition loop – equivalent to DO 700 IC=1,NOF"""
-    
+def main_loop(state: PropellerState,
+              collector=None,
+              unit_system: str = "US") -> None:
+    """Main operating condition loop – equivalent to DO 700 IC=1,NOF.
+
+    Parameters
+    ----------
+    state       : PropellerState returned by call_input()
+    collector   : ResultsCollector to receive structured rows and messages,
+                  or None for plain stdout output (CLI mode)
+    unit_system : "US" or "SI" — controls the unit labels in log output only;
+                  all internal computation is always in US customary units
+    """
+    # ── Local aliases (same names as before; no module-level globals needed) ──
+    com_zinput = state
+    FC     = state.FC
+    RORO   = state.RORO
+    ZMS    = state.ZMS
+    CQUAN  = state.CQUAN   # noqa: F841  (referenced via com_zinput.CQUAN below)
+    COST70 = state.COST70
+    COST80 = state.COST80
+    BHPG   = state.BHPG
+    THRSTG = state.THRSTG
+    TIPSDG = state.TIPSDG
+
+    # ── Wire PERFM / REVTHT emitters to this run's collector ────────────────
+    import PERFM, REVTHT
+    _emitter = collector.add_message if collector is not None else print
+    PERFM._emit_fn  = _emitter
+    REVTHT._emit_fn = _emitter
+
+    def _emit(text: str) -> None:
+        _emitter(text)
+
     for IC in range(int(com_zinput.NOF)):          # IC: 0-based (Fortran IC was 1-based)
         
         # NCOST = DCOST(IC) + .01
@@ -453,7 +433,7 @@ def main_loop():
                                        CP, com_zinput.BETA[IC], RORO[IC],
                                        com_zinput.BHP[IC], com_zinput.RPMC[IC],
                                        PCPWC, com_zinput.ANDVK[IC],
-                                       IC=IC + 1, collector=_collector)
+                                       IC=IC + 1, collector=collector)
                                 PCPWC += com_zinput.DPCPW[IC]
                             continue   # next diameter (Fortran falls through to label 800)
 
@@ -649,7 +629,7 @@ def main_loop():
                             torque_ftlbf  = (SHP_out * 5252.11 / RPM_prop) if RPM_prop > 0.0 else 0.0
 
                             # Convert dimensional values for log display
-                            _si = (_unit_system == "SI")
+                            _si = (unit_system == "SI")
                             log_dia    = DIA           * FT_TO_M     if _si else DIA
                             log_vt     = TIPSPD        * FPS_TO_MS   if _si else TIPSPD
                             log_thr    = THRUST_out    * LBF_TO_N    if _si else THRUST_out
@@ -701,9 +681,9 @@ def main_loop():
                             _emit(result_line)
 
                             # Feed structured row to HMI collector if attached
-                            if _collector is not None:
+                            if collector is not None:
                                 from output import ResultRow
-                                _collector.add_row(ResultRow(
+                                collector.add_row(ResultRow(
                                     condition  = IC + 1,
                                     blades     = BLADT,
                                     af         = AFT,
@@ -768,6 +748,7 @@ def run_map(conditions: List[OperatingCondition],
     """
     from output import MapPoint, MapCurve, MapResult
 
+    state = PropellerState()
     load_conditions(conditions, geometry, state)
 
     IC = ic_index

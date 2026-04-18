@@ -1711,22 +1711,13 @@ class PropellerHMI(tk.Tk):
 
     def _run_computation(self, conditions, geom):
         """Runs in a background thread; posts results back to GUI thread."""
-        import MAIN as main_module
-        from MAIN import state, main_loop, call_input, set_collector
+        from MAIN import call_input, main_loop
 
         collector = ResultsCollector()
         collector._tick_fn = self._progress_tick   # increment counter from bg thread
 
-        # Attach the collector so all _emit() calls in MAIN/PERFM/REVTHT reach it
-        set_collector(collector)
-        main_module._unit_system = self._us.value   # "US" or "SI" for log output
-
-        try:
-            call_input(conditions, geom)
-            main_loop()
-        finally:
-            # Always detach the collector, even if an exception occurred
-            set_collector(None)
+        state = call_input(conditions, geom)
+        main_loop(state, collector=collector, unit_system=self._us.value)
 
         self._last_summary = collector.summary
         self._last_summary.nof         = len(conditions)

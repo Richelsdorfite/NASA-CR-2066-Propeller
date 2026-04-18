@@ -93,17 +93,12 @@ class TestTMutationFix:
     """
 
     def _run(self, conditions, geometry):
-        from MAIN import call_input, main_loop, set_collector
+        from MAIN import call_input, main_loop
         from output import ResultsCollector
-        import MAIN as M
         col = ResultsCollector()
-        set_collector(col)
-        call_input(conditions, geometry)
-        try:
-            main_loop()
-        finally:
-            set_collector(None)
-        return col
+        state = call_input(conditions, geometry)
+        main_loop(state, collector=col)
+        return col, state
 
     def test_T_field_not_mutated_after_run(self):
         """
@@ -111,7 +106,6 @@ class TestTMutationFix:
         original °F value (32.33), not the converted Rankine value.
         """
         from operating_condition import OperatingCondition, PropellerGeometry
-        from MAIN import state
 
         geom = PropellerGeometry(
             D=6.0, DD=0.0, ND=1, AF=150.0, DAF=0.0, NAF=1,
@@ -121,8 +115,9 @@ class TestTMutationFix:
             IW=2, THRUST=370.0, ALT=7500.0, VKTAS=163.2,
             TS=850.0, DTS=0.0, NDTS=1, T=32.33)
 
-        self._run([cond], geom)
-        # state.T[0] is populated by load_conditions from cond.T
+        _, state = self._run([cond], geom)
+        # state.T[0] is populated by call_input from cond.T; main_loop must
+        # never overwrite it with the Rankine-converted value
         assert state.T[0] == pytest.approx(32.33, abs=0.01), \
             "T[IC] must NOT be overwritten with Rankine value"
 
@@ -141,8 +136,8 @@ class TestTMutationFix:
             IW=2, THRUST=370.0, ALT=7500.0, VKTAS=163.2,
             TS=850.0, DTS=0.0, NDTS=1, T=32.33)
 
-        col1 = self._run([cond], geom)
-        col2 = self._run([cond], geom)
+        col1, _ = self._run([cond], geom)
+        col2, _ = self._run([cond], geom)
 
         assert col1.summary.rows, "Run 1 produced no results"
         assert col2.summary.rows, "Run 2 produced no results"
